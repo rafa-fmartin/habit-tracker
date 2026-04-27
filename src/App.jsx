@@ -6,6 +6,7 @@ import { db } from './db';
 export default function App() {
   const [newHabit, setNewHabit] = useState('');
   const habits = useLiveQuery(() => db.habits.toArray());
+  const history = useLiveQuery(() => db.history.toArray());
 
   const addHabit = async (e) => {
     e.preventDefault();
@@ -35,6 +36,8 @@ export default function App() {
         streak: Math.max(0, currentStreak - 1),
         bestStreak: habit.previousBestStreak || habit.bestStreak
       });
+      // Remove from history
+      await db.history.where({ habitId: id, date: today }).delete();
     } else {
       // Complete: Check if it's a continuation or a reset
       const isContinuation = lastDate === yesterday;
@@ -42,12 +45,14 @@ export default function App() {
       const newBestStreak = Math.max(habit.bestStreak || 0, newStreak);
 
       await db.habits.update(id, {
-        previousBestStreak: habit.bestStreak, // Store current best to allow undo
+        previousBestStreak: habit.bestStreak,
         previousLastCompleted: habit.lastCompleted,
         lastCompleted: today,
         streak: newStreak,
         bestStreak: newBestStreak
       });
+      // Add to history
+      await db.history.add({ habitId: id, date: today });
     }
   };
 
@@ -77,11 +82,60 @@ export default function App() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const yesterday = today - 86400000;
-
+    
     if (!habit.lastCompleted) return 0;
     // Se a última vez foi antes de ontem, a sequência quebrou
     if (habit.lastCompleted < yesterday) return 0;
     return habit.streak;
+  };
+
+  const renderHeatmap = () => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const daysToShow = 56; // 8 weeks
+    const days = [];
+
+    for (let i = daysToShow - 1; i >= 0; i--) {
+      days.push(today - i * 86400000);
+    }
+
+    return (
+      <div className="mt-12 bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+        <h3 className="text-zinc-900 font-bold mb-4 text-sm uppercase tracking-wider flex items-center gap-2">
+          <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+          Consistência Global
+        </h3>
+        <div className="flex gap-1.5 flex-wrap">
+          {days.map(day => {
+            const count = history?.filter(h => h.date === day).length || 0;
+            const intensity = totalHabits > 0 ? (count / totalHabits) : 0;
+            
+            return (
+              <div 
+                key={day}
+                className={`w-3 h-3 rounded-[3px] transition-all duration-500 ${
+                  intensity === 0 ? 'bg-zinc-100' :
+                  intensity <= 0.3 ? 'bg-emerald-200' :
+                  intensity <= 0.7 ? 'bg-emerald-400' :
+                  'bg-emerald-600'
+                }`}
+                title={`${new Date(day).toLocaleDateString()}: ${count} hábitos`}
+              />
+            );
+          })}
+        </div>
+        <div className="mt-4 flex justify-between items-center text-[10px] text-zinc-400 font-bold uppercase">
+          <span>Menos</span>
+          <div className="flex gap-1">
+            <div className="w-2 h-2 bg-zinc-100 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-200 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-400 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-600 rounded-[2px]" />
+          </div>
+          <span>Mais</span>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -175,6 +229,10 @@ export default function App() {
           ))}
         </div>
       </main>
+
+      <footer className="max-w-md mx-auto mb-20 px-2">
+        {renderHeatmap()}
+      </footer>
     </div>
   );
 }

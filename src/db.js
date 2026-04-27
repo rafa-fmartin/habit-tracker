@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 
 export const db = new Dexie('habitTrackerDB');
 
-db.version(2).stores({
-  habits: '++id, title, streak, bestStreak, lastCompleted'
+db.version(3).stores({
+  habits: '++id, title, streak, bestStreak, lastCompleted',
+  history: '++id, habitId, date'
 });
