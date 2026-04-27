@@ -6,10 +6,23 @@ import { db } from './db';
 export default function App() {
   const [newHabit, setNewHabit] = useState('');
   const [habitType, setHabitType] = useState('good');
+  const [habitDays, setHabitDays] = useState([0, 1, 2, 3, 4, 5, 6]); // All days by default
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [pendingToggles, setPendingToggles] = useState(new Set());
+  
   const habits = useLiveQuery(() => db.habits.toArray());
   const history = useLiveQuery(() => db.history.toArray());
+  const userStats = useLiveQuery(() => db.userStats.get(1));
+
+  useEffect(() => {
+    const initStats = async () => {
+      const stats = await db.userStats.get(1);
+      if (!stats) {
+        await db.userStats.add({ id: 1, xp: 0, level: 1 });
+      }
+    };
+    initStats();
+  }, []);
 
   useEffect(() => {
     if (darkMode) {
@@ -27,12 +40,15 @@ export default function App() {
     await db.habits.add({
       title: newHabit,
       type: habitType,
+      days: habitDays,
+      frequency: habitDays.length === 7 ? 'daily' : 'flexible',
       streak: 0,
       bestStreak: 0,
       lastCompleted: null
     });
     setNewHabit('');
     setHabitType('good');
+    setHabitDays([0, 1, 2, 3, 4, 5, 6]);
   };
 
   const toggleHabit = async (id, currentStreak) => {
@@ -57,7 +73,8 @@ export default function App() {
       await db.history.where({ habitId: id, date: today }).delete();
     } else {
       // Complete: Check if it's a continuation or a reset
-      const isContinuation = lastDate === yesterday;
+      const lastScheduled = getPreviousScheduledDay(habit.days || [0,1,2,3,4,5,6]);
+      const isContinuation = lastDate === lastScheduled;
       const newStreak = isContinuation ? currentStreak + 1 : 1;
       const newBestStreak = Math.max(habit.bestStreak || 0, newStreak);
 
@@ -77,6 +94,26 @@ export default function App() {
         date: today, 
         timestamp: new Date().getTime() 
       });
+
+      // Gamification: XP Gain
+      const stats = await db.userStats.get(1);
+      const xpGain = habit.type === 'bad' ? 15 : 10;
+      let newXp = (stats?.xp || 0) + xpGain;
+      let newLevel = stats?.level || 1;
+      
+      const xpToNextLevel = newLevel * 100;
+      if (newXp >= xpToNextLevel) {
+        newXp -= xpToNextLevel;
+        newLevel += 1;
+        confetti({
+          particleCount: 200,
+          spread: 90,
+          origin: { y: 0.6 },
+          colors: ['#fbbf24', '#f59e0b', '#ffffff']
+        });
+      }
+      
+      await db.userStats.put({ id: 1, xp: newXp, level: newLevel });
     }
   };
 
@@ -141,6 +178,32 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const getPreviousScheduledDay = (habitDays, fromDate = new Date()) => {
+    const today = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate()).getTime();
+    for (let i = 1; i <= 7; i++) {
+      const prev = new Date(today - i * 86400000);
+      if (habitDays.includes(prev.getDay())) return prev.getTime();
+    }
+    return null;
+  };
+
+  const getEffectiveStreak = (habit) => {
+    if (!habit.lastCompleted) return 0;
+    
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    
+    // If it's a scheduled day today and it's not completed yet, check if it broke on the previous scheduled day
+    const isScheduledToday = habit.days?.includes(now.getDay());
+    const lastScheduled = getPreviousScheduledDay(habit.days || [0,1,2,3,4,5,6]);
+    
+    if (habit.lastCompleted < lastScheduled && (isScheduledToday || lastScheduled > habit.lastCompleted)) {
+      return 0;
+    }
+    
+    return habit.streak;
+  };
+
   const todayTimestamp = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
   
   const isHabitCompleted = (habit) => {
@@ -149,13 +212,14 @@ export default function App() {
     return isPending ? !dbCompleted : dbCompleted;
   };
 
-  const completedToday = habits?.filter(h => isHabitCompleted(h)).length || 0;
-  const totalHabits = habits?.length || 0;
-  const progressPercentage = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
+  const activeHabitsToday = habits?.filter(h => h.days?.includes(new Date().getDay()) || !h.days) || [];
+  const completedTodayCount = activeHabitsToday.filter(h => isHabitCompleted(h)).length;
+  const totalActiveHabits = activeHabitsToday.length;
+  const progressPercentage = totalActiveHabits > 0 ? Math.round((completedTodayCount / totalActiveHabits) * 100) : 0;
 
   useEffect(() => {
-    if (progressPercentage === 100 && totalHabits > 0) {
-      const hasBadHabits = habits?.some(h => h.type === 'bad');
+    if (progressPercentage === 100 && totalActiveHabits > 0) {
+      const hasBadHabits = activeHabitsToday.some(h => h.type === 'bad');
       confetti({
         particleCount: 150,
         spread: 70,
@@ -165,19 +229,7 @@ export default function App() {
           : ['#09090b', '#71717a', '#10b981']
       });
     }
-  }, [progressPercentage, totalHabits]);
-
-  const getEffectiveStreak = (habit) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterday = today - 86400000;
-    
-    if (!habit.lastCompleted) return 0;
-    // Se a última vez foi antes de ontem, a sequência quebrou
-    if (habit.lastCompleted < yesterday) return 0;
-    return habit.streak;
-  };
-
+  }, [progressPercentage, totalActiveHabits]);
   const renderHeatmap = () => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -187,6 +239,8 @@ export default function App() {
     for (let i = daysToShow - 1; i >= 0; i--) {
       days.push(today - i * 86400000);
     }
+
+    const totalHabits = habits?.length || 0;
 
     return (
       <div className="mt-12 bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
@@ -329,11 +383,29 @@ export default function App() {
           <span className="h-px w-8 bg-zinc-300 dark:bg-zinc-800"></span>
         </div>
 
+        {userStats && (
+          <div className="mt-8 px-4">
+            <div className="flex justify-between items-end mb-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-zinc-400 text-[10px] font-black uppercase tracking-widest">Nível</span>
+                <span className="text-2xl font-black text-zinc-900 dark:text-white">{userStats.level}</span>
+              </div>
+              <span className="text-zinc-400 text-[10px] font-bold uppercase">{userStats.xp} / {userStats.level * 100} XP</span>
+            </div>
+            <div className="h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner p-0.5">
+              <div 
+                className="h-full bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+                style={{ width: `${(userStats.xp / (userStats.level * 100)) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {totalHabits > 0 && (
           <div className="mt-8 px-4">
             <div className="flex justify-between items-end mb-2">
               <span className="text-zinc-400 text-xs font-bold uppercase">Progresso de Hoje</span>
-              <span className="text-zinc-900 font-black text-lg">{progressPercentage}%</span>
+              <span className="text-zinc-900 dark:text-white font-black text-lg">{progressPercentage}%</span>
             </div>
             <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner">
               <div 
@@ -385,11 +457,36 @@ export default function App() {
                 <span className="text-sm">🚫</span> Mau Hábito
               </button>
             </div>
+
+            <div className="flex flex-col gap-2 p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Repetir nos dias</p>
+              <div className="flex justify-between gap-1">
+                {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((day, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      const next = habitDays.includes(i) 
+                        ? habitDays.filter(d => d !== i)
+                        : [...habitDays, i];
+                      if (next.length > 0) setHabitDays(next);
+                    }}
+                    className={`w-9 h-9 rounded-lg text-xs font-bold transition-all border ${
+                      habitDays.includes(i)
+                        ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-md scale-110'
+                        : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 border-zinc-100 dark:border-zinc-800'
+                    }`}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </form>
 
         <div className="space-y-4">
-          {habits?.map((habit) => (
+          {habits?.filter(h => h.days?.includes(new Date().getDay()) || !h.days).map((habit) => (
             <div
               key={habit.id}
               className={`group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-2xl border shadow-sm transition-all hover:shadow-md ${
