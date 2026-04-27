@@ -5,6 +5,7 @@ import { db } from './db';
 
 export default function App() {
   const [newHabit, setNewHabit] = useState('');
+  const [habitType, setHabitType] = useState('good');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [pendingToggles, setPendingToggles] = useState(new Set());
   const habits = useLiveQuery(() => db.habits.toArray());
@@ -25,11 +26,13 @@ export default function App() {
 
     await db.habits.add({
       title: newHabit,
+      type: habitType,
       streak: 0,
       bestStreak: 0,
       lastCompleted: null
     });
     setNewHabit('');
+    setHabitType('good');
   };
 
   const toggleHabit = async (id, currentStreak) => {
@@ -152,11 +155,14 @@ export default function App() {
 
   useEffect(() => {
     if (progressPercentage === 100 && totalHabits > 0) {
+      const hasBadHabits = habits?.some(h => h.type === 'bad');
       confetti({
         particleCount: 150,
         spread: 70,
         origin: { y: 0.6 },
-        colors: ['#09090b', '#71717a', '#10b981']
+        colors: hasBadHabits 
+          ? ['#10b981', '#f43f5e', '#fbbf24', '#09090b'] 
+          : ['#09090b', '#71717a', '#10b981']
       });
     }
   }, [progressPercentage, totalHabits]);
@@ -242,34 +248,57 @@ export default function App() {
           hours[hour]++;
         }
       });
-      const peakHour = hours.indexOf(Math.max(...hours));
+      const goodHabitsCount = habits?.filter(h => h.type !== 'bad').length || 0;
+      const badHabitsCount = habits?.filter(h => h.type === 'bad').length || 0;
       
-      return { thisWeek, lastWeek, diff, trend, peakHour };
+      return { thisWeek, lastWeek, diff, trend, peakHour, goodHabitsCount, badHabitsCount };
     })();
 
     if (!stats) return null;
 
     return (
-      <div className="grid grid-cols-2 gap-4 mt-8">
-        <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
-          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Horário de Pico</p>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.peakHour}:00</span>
-            <span className="text-zinc-400 text-xs font-medium">h</span>
+      <div className="space-y-4 mt-8">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+            <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Horário de Pico</p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.peakHour}:00</span>
+              <span className="text-zinc-400 text-xs font-medium">h</span>
+            </div>
+            <p className="text-zinc-400 text-[9px] mt-1 leading-tight">Quando você é mais constante</p>
           </div>
-          <p className="text-zinc-400 text-[9px] mt-1 leading-tight">Quando você é mais constante</p>
+          <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+            <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Relatório Semanal</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.thisWeek}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${stats.diff >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-orange-50 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400'}`}>
+                {stats.diff >= 0 ? '+' : ''}{stats.diff}
+              </span>
+            </div>
+            <p className="text-zinc-400 text-[9px] mt-1 leading-tight">
+              {stats.diff >= 0 ? 'Desempenho superior' : 'Abaixo'} da semana passada
+            </p>
+          </div>
         </div>
-        <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
-          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Relatório Semanal</p>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.thisWeek}</span>
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${stats.diff >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-orange-50 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400'}`}>
-              {stats.diff >= 0 ? '+' : ''}{stats.diff}
-            </span>
+
+        <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col">
+              <span className="text-xl font-black text-zinc-900 dark:text-white">{stats.goodHabitsCount}</span>
+              <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-tighter">Bons Hábitos</span>
+            </div>
+            <div className="w-px h-8 bg-zinc-100 dark:bg-zinc-800" />
+            <div className="flex flex-col">
+              <span className="text-xl font-black text-zinc-900 dark:text-white">{stats.badHabitsCount}</span>
+              <span className="text-[9px] font-bold text-rose-500 uppercase tracking-tighter">Maus Hábitos</span>
+            </div>
           </div>
-          <p className="text-zinc-400 text-[9px] mt-1 leading-tight">
-            {stats.diff >= 0 ? 'Desempenho superior' : 'Abaixo'} da semana passada
-          </p>
+          <div className="text-right">
+            <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider">Foco Atual</p>
+            <p className="text-zinc-900 dark:text-zinc-100 text-xs font-black">
+              {stats.goodHabitsCount >= stats.badHabitsCount ? 'Construção' : 'Disciplina'}
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -318,17 +347,44 @@ export default function App() {
 
       <main className="max-w-md mx-auto">
         <form onSubmit={addHabit} className="mb-8 group">
-          <div className="flex gap-2 p-1.5 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 focus-within:ring-4 focus-within:ring-zinc-900/5 transition-all">
-            <input
-              type="text"
-              value={newHabit}
-              onChange={(e) => setNewHabit(e.target.value)}
-              placeholder="Qual o hábito de hoje?"
-              className="flex-1 px-4 py-3 bg-transparent outline-none text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
-            />
-            <button className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-3 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-white active:scale-95 transition-all shadow-lg shadow-zinc-200 dark:shadow-none">
-              Adicionar
-            </button>
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-2 p-1.5 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 focus-within:ring-4 focus-within:ring-zinc-900/5 transition-all">
+              <input
+                type="text"
+                value={newHabit}
+                onChange={(e) => setNewHabit(e.target.value)}
+                placeholder="Qual o hábito de hoje?"
+                className="flex-1 px-4 py-3 bg-transparent outline-none text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
+              />
+              <button className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-3 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-white active:scale-95 transition-all shadow-lg shadow-zinc-200 dark:shadow-none">
+                Adicionar
+              </button>
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setHabitType('good')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 transition-all font-bold text-xs uppercase tracking-wider ${
+                  habitType === 'good' 
+                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400 shadow-sm' 
+                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-400 hover:border-zinc-200 dark:hover:border-zinc-700'
+                }`}
+              >
+                <span className="text-sm">✨</span> Bom Hábito
+              </button>
+              <button
+                type="button"
+                onClick={() => setHabitType('bad')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 transition-all font-bold text-xs uppercase tracking-wider ${
+                  habitType === 'bad' 
+                    ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 shadow-sm' 
+                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-400 hover:border-zinc-200 dark:hover:border-zinc-700'
+                }`}
+              >
+                <span className="text-sm">🚫</span> Mau Hábito
+              </button>
+            </div>
           </div>
         </form>
 
@@ -336,11 +392,19 @@ export default function App() {
           {habits?.map((habit) => (
             <div
               key={habit.id}
-              className="group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:border-zinc-200 dark:hover:border-zinc-700 transition-all hover:shadow-md"
+              className={`group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-2xl border shadow-sm transition-all hover:shadow-md ${
+                habit.type === 'bad' 
+                  ? 'border-rose-100 dark:border-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800/50' 
+                  : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+              }`}
             >
               <div className="flex flex-col flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-zinc-800 dark:text-zinc-100 text-lg leading-tight">{habit.title}</span>
+                  <span className={`font-bold text-lg leading-tight ${
+                    habit.type === 'bad' ? 'text-rose-900 dark:text-rose-100' : 'text-zinc-800 dark:text-zinc-100'
+                  }`}>
+                    {habit.title}
+                  </span>
                   <button 
                     onClick={() => deleteHabit(habit.id)}
                     className="opacity-20 hover:opacity-100 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-400 transition-all ml-1"
@@ -362,6 +426,9 @@ export default function App() {
                       <span className="text-zinc-400 text-[10px] font-bold uppercase tracking-tight">Recorde: {habit.bestStreak}</span>
                     </div>
                   )}
+                  {habit.type === 'bad' && (
+                    <span className="bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md tracking-wider">Mau Hábito</span>
+                  )}
                 </div>
               </div>
 
@@ -369,9 +436,11 @@ export default function App() {
                 onClick={() => handleToggleDraft(habit.id)}
                 className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all border-2 
                   ${isHabitCompleted(habit)
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                    ? habit.type === 'bad'
+                      ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/50 text-rose-600 dark:text-rose-400'
+                      : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
                     : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
-                  } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-emerald-500/20' : ''}`}
+                  } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-zinc-500/20' : ''}`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
