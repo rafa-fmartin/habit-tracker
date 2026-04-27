@@ -19,20 +19,39 @@ export default function App() {
   };
 
   const toggleHabit = async (id, currentStreak) => {
-    const today = new Date().toLocaleDateString();
-    const habit = await db.habits.get(id);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterday = today - 86400000;
     
-    if (habit.lastCompleted === today) {
+    const habit = await db.habits.get(id);
+    const lastDate = habit.lastCompleted ? new Date(habit.lastCompleted).getTime() : 0;
+    
+    if (lastDate === today) {
+      // Undo: Go back to previous streak
       await db.habits.update(id, {
-        lastCompleted: null,
+        lastCompleted: habit.previousLastCompleted || null,
         streak: Math.max(0, currentStreak - 1)
       });
     } else {
+      // Complete: Check if it's a continuation or a reset
+      const isContinuation = lastDate === yesterday;
       await db.habits.update(id, {
+        previousLastCompleted: habit.lastCompleted,
         lastCompleted: today,
-        streak: currentStreak + 1
+        streak: isContinuation ? currentStreak + 1 : 1
       });
     }
+  };
+
+  const getEffectiveStreak = (habit) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterday = today - 86400000;
+    
+    if (!habit.lastCompleted) return 0;
+    // Se a última vez foi antes de ontem, a sequência quebrou
+    if (habit.lastCompleted < yesterday) return 0;
+    return habit.streak;
   };
 
   return (
@@ -72,14 +91,14 @@ export default function App() {
                 <span className="font-bold text-zinc-800 text-lg leading-tight">{habit.title}</span>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-orange-500 text-sm">🔥</span>
-                  <span className="text-zinc-500 text-sm font-medium">{habit.streak} dias de sequência</span>
+                  <span className="text-zinc-500 text-sm font-medium">{getEffectiveStreak(habit)} dias de sequência</span>
                 </div>
               </div>
 
               <button
                 onClick={() => toggleHabit(habit.id, habit.streak)}
                 className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all border-2 
-                  ${habit.lastCompleted === new Date().toLocaleDateString()
+                  ${habit.lastCompleted === new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime()
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
                     : 'bg-zinc-50 border-zinc-200 text-transparent hover:border-zinc-400'
                   }`}
