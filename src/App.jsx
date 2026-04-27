@@ -32,7 +32,8 @@ export default function App() {
       // Undo: Go back to previous streak
       await db.habits.update(id, {
         lastCompleted: habit.previousLastCompleted || null,
-        streak: Math.max(0, currentStreak - 1)
+        streak: Math.max(0, currentStreak - 1),
+        bestStreak: habit.previousBestStreak || habit.bestStreak
       });
     } else {
       // Complete: Check if it's a continuation or a reset
@@ -41,6 +42,7 @@ export default function App() {
       const newBestStreak = Math.max(habit.bestStreak || 0, newStreak);
 
       await db.habits.update(id, {
+        previousBestStreak: habit.bestStreak, // Store current best to allow undo
         previousLastCompleted: habit.lastCompleted,
         lastCompleted: today,
         streak: newStreak,
