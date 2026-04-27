@@ -7,6 +7,9 @@ export default function App() {
   const [newHabit, setNewHabit] = useState('');
   const [habitType, setHabitType] = useState('good');
   const [habitDays, setHabitDays] = useState([0, 1, 2, 3, 4, 5, 6]); // All days by default
+  const [initialStreak, setInitialStreak] = useState(0);
+  const [activeTab, setActiveTab] = useState('checklist');
+  const [error, setError] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [pendingToggles, setPendingToggles] = useState(new Set());
   
@@ -16,9 +19,14 @@ export default function App() {
 
   useEffect(() => {
     const initStats = async () => {
-      const stats = await db.userStats.get(1);
-      if (!stats) {
-        await db.userStats.add({ id: 1, xp: 0, level: 1 });
+      try {
+        const stats = await db.userStats.get(1);
+        if (!stats) {
+          await db.userStats.add({ id: 1, xp: 0, level: 1 });
+        }
+      } catch (err) {
+        console.error("Failed to init stats:", err);
+        setError("Erro ao inicializar banco de dados. Tente recarregar a página.");
       }
     };
     initStats();
@@ -42,24 +50,26 @@ export default function App() {
       type: habitType,
       days: habitDays,
       frequency: habitDays.length === 7 ? 'daily' : 'flexible',
-      streak: 0,
-      bestStreak: 0,
-      lastCompleted: null
+      streak: parseInt(initialStreak) || 0,
+      bestStreak: parseInt(initialStreak) || 0,
+      lastCompleted: initialStreak > 0 ? getPreviousScheduledDay(habitDays) : null
     });
     setNewHabit('');
     setHabitType('good');
     setHabitDays([0, 1, 2, 3, 4, 5, 6]);
+    setInitialStreak(0);
   };
 
   const toggleHabit = async (id, currentStreak) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterday = today - 86400000;
 
     const habit = await db.habits.get(id);
     const lastDate = habit.lastCompleted ? new Date(habit.lastCompleted).getTime() : 0;
 
-    if (lastDate === today) {
+    const isUndo = lastDate === today;
+
+    if (isUndo) {
       // Undo: Go back to previous streak
       const updatedHabit = {
         ...habit,
@@ -94,13 +104,17 @@ export default function App() {
         date: today, 
         timestamp: new Date().getTime() 
       });
+    }
 
-      // Gamification: XP Gain
-      const stats = await db.userStats.get(1);
-      const xpGain = habit.type === 'bad' ? 15 : 10;
-      let newXp = (stats?.xp || 0) + xpGain;
-      let newLevel = stats?.level || 1;
-      
+    // Gamification: XP update
+    const stats = await db.userStats.get(1);
+    const baseChange = habit.type === 'bad' ? -10 : 10;
+    const xpChange = isUndo ? -baseChange : baseChange;
+    
+    let newXp = (stats?.xp || 0) + xpChange;
+    let newLevel = stats?.level || 1;
+    
+    if (xpChange > 0) {
       const xpToNextLevel = newLevel * 100;
       if (newXp >= xpToNextLevel) {
         newXp -= xpToNextLevel;
@@ -112,18 +126,47 @@ export default function App() {
           colors: ['#fbbf24', '#f59e0b', '#ffffff']
         });
       }
-      
-      await db.userStats.put({ id: 1, xp: newXp, level: newLevel });
+    } else {
+      if (newXp < 0 && newLevel > 1) {
+        newLevel -= 1;
+        newXp += (newLevel * 100);
+      } else if (newXp < 0 && newLevel === 1) {
+        newXp = 0;
+      }
     }
+    
+    await db.userStats.put({ id: 1, xp: newXp, level: newLevel });
   };
 
   const saveChanges = async () => {
+    // Determine which habits are being completed in this batch
+    const hasAnyBadHabitToday = activeHabitsToday.some(h => h.type === 'bad');
+    
     for (const id of pendingToggles) {
       const habit = habits.find(h => h.id === id);
       if (habit) {
         await toggleHabit(id, habit.streak);
       }
     }
+
+    // Check if after this save, all good habits are done and no bad habits were involved
+    const newCompletedCount = activeHabitsToday.filter(h => {
+      const isActuallyDone = h.lastCompleted === todayTimestamp;
+      const isBeingToggled = pendingToggles.has(h.id);
+      // If it's done and NOT being toggled, it's completed.
+      // If it's NOT done but IS being toggled, it's now completed.
+      return (isActuallyDone && !isBeingToggled) || (!isActuallyDone && isBeingToggled);
+    }).length;
+
+    if (newCompletedCount === totalActiveHabits && totalActiveHabits > 0 && !hasAnyBadHabitToday) {
+      confetti({
+        particleCount: 200,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ['#10b981', '#fbbf24', '#ffffff']
+      });
+    }
+
     setPendingToggles(new Set());
   };
 
@@ -172,6 +215,7 @@ export default function App() {
           window.location.reload();
         }
       } catch (err) {
+        console.error('Import error:', err);
         alert('Arquivo inválido ou corrompido.');
       }
     };
@@ -191,7 +235,6 @@ export default function App() {
     if (!habit.lastCompleted) return 0;
     
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     
     // If it's a scheduled day today and it's not completed yet, check if it broke on the previous scheduled day
     const isScheduledToday = habit.days?.includes(now.getDay());
@@ -213,23 +256,17 @@ export default function App() {
   };
 
   const activeHabitsToday = habits?.filter(h => h.days?.includes(new Date().getDay()) || !h.days) || [];
-  const completedTodayCount = activeHabitsToday.filter(h => isHabitCompleted(h)).length;
+  const goodHabitsToday = activeHabitsToday.filter(h => h.type !== 'bad');
+  const badHabitsToday = activeHabitsToday.filter(h => h.type === 'bad');
+  
+  const completedGoodCount = goodHabitsToday.filter(h => isHabitCompleted(h)).length;
+  const performedBadCount = badHabitsToday.filter(h => isHabitCompleted(h)).length;
+  
+  const goodProgress = goodHabitsToday.length > 0 ? Math.round((completedGoodCount / goodHabitsToday.length) * 100) : 0;
+  const badProgress = badHabitsToday.length > 0 ? Math.round((performedBadCount / badHabitsToday.length) * 100) : 0;
+  
   const totalActiveHabits = activeHabitsToday.length;
-  const progressPercentage = totalActiveHabits > 0 ? Math.round((completedTodayCount / totalActiveHabits) * 100) : 0;
 
-  useEffect(() => {
-    if (progressPercentage === 100 && totalActiveHabits > 0) {
-      const hasBadHabits = activeHabitsToday.some(h => h.type === 'bad');
-      confetti({
-        particleCount: 150,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: hasBadHabits 
-          ? ['#10b981', '#f43f5e', '#fbbf24', '#09090b'] 
-          : ['#09090b', '#71717a', '#10b981']
-      });
-    }
-  }, [progressPercentage, totalActiveHabits]);
   const renderHeatmap = () => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -302,6 +339,7 @@ export default function App() {
           hours[hour]++;
         }
       });
+      const peakHour = hours.indexOf(Math.max(...hours));
       const goodHabitsCount = habits?.filter(h => h.type !== 'bad').length || 0;
       const badHabitsCount = habits?.filter(h => h.type === 'bad').length || 0;
       
@@ -358,9 +396,38 @@ export default function App() {
     );
   };
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center p-6">
+        <div className="max-w-xs text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <p className="text-zinc-900 dark:text-white font-black mb-2">Ops! Algo deu errado.</p>
+          <p className="text-zinc-500 text-xs mb-6">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-bold text-sm"
+          >
+            Recarregar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!habits || !userStats) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-zinc-200 dark:border-zinc-800 border-t-zinc-900 dark:border-t-white rounded-full animate-spin"></div>
+          <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest animate-pulse">Sincronizando...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-6 text-zinc-900 dark:text-zinc-100 selection:bg-zinc-200 transition-colors duration-500">
-      <header className="mb-12 max-w-md mx-auto pt-8 text-center relative">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-6 text-zinc-900 dark:text-zinc-100 selection:bg-zinc-200 transition-colors duration-500 pb-40">
+      <header className="mb-8 max-w-md mx-auto pt-8 text-center relative">
         <button 
           onClick={() => setDarkMode(!darkMode)}
           className="absolute right-0 top-8 p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all active:scale-95"
@@ -392,7 +459,7 @@ export default function App() {
               </div>
               <span className="text-zinc-400 text-[10px] font-bold uppercase">{userStats.xp} / {userStats.level * 100} XP</span>
             </div>
-            <div className="h-3 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner p-0.5">
+            <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner p-0.5">
               <div 
                 className="h-full bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(245,158,11,0.3)]"
                 style={{ width: `${(userStats.xp / (userStats.level * 100)) * 100}%` }}
@@ -400,154 +467,245 @@ export default function App() {
             </div>
           </div>
         )}
-
-        {totalHabits > 0 && (
-          <div className="mt-8 px-4">
-            <div className="flex justify-between items-end mb-2">
-              <span className="text-zinc-400 text-xs font-bold uppercase">Progresso de Hoje</span>
-              <span className="text-zinc-900 dark:text-white font-black text-lg">{progressPercentage}%</span>
-            </div>
-            <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner">
-              <div 
-                className="h-full bg-zinc-900 dark:bg-emerald-500 transition-all duration-700 ease-out shadow-[0_0_10px_rgba(0,0,0,0.1)]"
-                style={{ width: `${progressPercentage}%` }}
-              />
-            </div>
-          </div>
-        )}
       </header>
 
       <main className="max-w-md mx-auto">
-        <form onSubmit={addHabit} className="mb-8 group">
-          <div className="flex flex-col gap-3">
-            <div className="flex gap-2 p-1.5 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 focus-within:ring-4 focus-within:ring-zinc-900/5 transition-all">
-              <input
-                type="text"
-                value={newHabit}
-                onChange={(e) => setNewHabit(e.target.value)}
-                placeholder="Qual o hábito de hoje?"
-                className="flex-1 px-4 py-3 bg-transparent outline-none text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
-              />
-              <button className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-3 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-white active:scale-95 transition-all shadow-lg shadow-zinc-200 dark:shadow-none">
-                Adicionar
-              </button>
-            </div>
-            
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setHabitType('good')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 transition-all font-bold text-xs uppercase tracking-wider ${
-                  habitType === 'good' 
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400 shadow-sm' 
-                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-400 hover:border-zinc-200 dark:hover:border-zinc-700'
-                }`}
-              >
-                <span className="text-sm">✨</span> Bom Hábito
-              </button>
-              <button
-                type="button"
-                onClick={() => setHabitType('bad')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 transition-all font-bold text-xs uppercase tracking-wider ${
-                  habitType === 'bad' 
-                    ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 shadow-sm' 
-                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-400 hover:border-zinc-200 dark:hover:border-zinc-700'
-                }`}
-              >
-                <span className="text-sm">🚫</span> Mau Hábito
-              </button>
+        {activeTab === 'checklist' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {totalActiveHabits > 0 ? (
+              <>
+                <div className="mb-10 space-y-6">
+                  {goodHabitsToday.length > 0 && (
+                    <div className="px-4">
+                      <div className="flex justify-between items-end mb-2">
+                        <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-black uppercase tracking-widest">Bons Hábitos</span>
+                        <span className="text-zinc-900 dark:text-white font-black text-sm">{goodProgress}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-emerald-500 transition-all duration-700 ease-out"
+                          style={{ width: `${goodProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {badHabitsToday.length > 0 && (
+                    <div className="px-4">
+                      <div className="flex justify-between items-end mb-2">
+                        <span className="text-rose-600 dark:text-rose-400 text-[10px] font-black uppercase tracking-widest">Maus Hábitos</span>
+                        <span className="text-zinc-900 dark:text-white font-black text-sm">{badProgress}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-rose-500 transition-all duration-700 ease-out"
+                          style={{ width: `${badProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  {activeHabitsToday.map((habit) => (
+                    <div
+                      key={habit.id}
+                      className={`group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-3xl border shadow-sm transition-all hover:shadow-md ${
+                        habit.type === 'bad' 
+                          ? 'border-rose-100 dark:border-rose-900/30' 
+                          : 'border-zinc-100 dark:border-zinc-800'
+                      }`}
+                    >
+                      <div className="flex flex-col flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold text-lg leading-tight ${
+                            habit.type === 'bad' ? 'text-rose-900 dark:text-rose-100' : 'text-zinc-800 dark:text-zinc-100'
+                          }`}>
+                            {habit.title}
+                          </span>
+                          {habit.type === 'bad' && (
+                            <span className="text-rose-400 text-[10px] font-black uppercase tracking-tighter">(Falhei)</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-orange-500 text-xs">🔥</span>
+                            <span className="text-zinc-500 text-xs font-bold">{getEffectiveStreak(habit)} dias</span>
+                          </div>
+                          {habit.type === 'bad' && (
+                            <span className="bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md">Evitar</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleToggleDraft(habit.id)}
+                        className={`h-14 w-14 rounded-2xl flex items-center justify-center transition-all border-2 
+                          ${isHabitCompleted(habit)
+                            ? habit.type === 'bad'
+                              ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/50 text-rose-600 dark:text-rose-400'
+                              : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
+                          } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-zinc-500/20 shadow-xl' : ''}`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="py-20 text-center">
+                <div className="text-5xl mb-6 opacity-20 grayscale">🛋️</div>
+                <p className="text-zinc-400 font-bold text-sm uppercase tracking-widest">Nada agendado para hoje</p>
+                <button 
+                  onClick={() => setActiveTab('manage')}
+                  className="mt-6 text-zinc-900 dark:text-white text-xs font-black underline underline-offset-4"
+                >
+                  Gerenciar Meus Hábitos
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'manage' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-10 text-center">
+              <p className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Configuração Contínua</p>
+              <h2 className="text-2xl font-black text-zinc-900 dark:text-white">Gerenciar Hábitos</h2>
             </div>
 
-            <div className="flex flex-col gap-2 p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Repetir nos dias</p>
-              <div className="flex justify-between gap-1">
-                {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((day, i) => (
+            <form onSubmit={addHabit} className="mb-12">
+              <div className="flex flex-col gap-4">
+                <div className="flex gap-2 p-2 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-400 transition-all">
+                  <input
+                    type="text"
+                    value={newHabit}
+                    onChange={(e) => setNewHabit(e.target.value)}
+                    placeholder="Nome do novo hábito..."
+                    className="flex-1 px-4 py-2 bg-transparent outline-none text-zinc-800 dark:text-zinc-100"
+                  />
+                  <button className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-6 py-2 rounded-xl font-black text-xs uppercase hover:scale-105 transition-all">
+                    Criar
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
                   <button
-                    key={i}
                     type="button"
-                    onClick={() => {
-                      const next = habitDays.includes(i) 
-                        ? habitDays.filter(d => d !== i)
-                        : [...habitDays, i];
-                      if (next.length > 0) setHabitDays(next);
-                    }}
-                    className={`w-9 h-9 rounded-lg text-xs font-bold transition-all border ${
-                      habitDays.includes(i)
-                        ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-md scale-110'
-                        : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 border-zinc-100 dark:border-zinc-800'
+                    onClick={() => setHabitType('good')}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-2xl border-2 transition-all font-black text-[10px] uppercase tracking-widest ${
+                      habitType === 'good' ? 'bg-emerald-50 border-emerald-500 text-emerald-600' : 'bg-white border-zinc-100 text-zinc-400'
                     }`}
                   >
-                    {day}
+                    ✨ Bom Hábito
                   </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </form>
+                  <button
+                    type="button"
+                    onClick={() => setHabitType('bad')}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-2xl border-2 transition-all font-black text-[10px] uppercase tracking-widest ${
+                      habitType === 'bad' ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-white border-zinc-100 text-zinc-400'
+                    }`}
+                  >
+                    🚫 Mau Hábito
+                  </button>
+                </div>
 
-        <div className="space-y-4">
-          {habits?.filter(h => h.days?.includes(new Date().getDay()) || !h.days).map((habit) => (
-            <div
-              key={habit.id}
-              className={`group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-2xl border shadow-sm transition-all hover:shadow-md ${
-                habit.type === 'bad' 
-                  ? 'border-rose-100 dark:border-rose-900/30 hover:border-rose-200 dark:hover:border-rose-800/50' 
-                  : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
-              }`}
-            >
-              <div className="flex flex-col flex-1">
-                <div className="flex items-center gap-2">
-                  <span className={`font-bold text-lg leading-tight ${
-                    habit.type === 'bad' ? 'text-rose-900 dark:text-rose-100' : 'text-zinc-800 dark:text-zinc-100'
-                  }`}>
-                    {habit.title}
-                  </span>
+                <div className="p-5 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800">
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Agendamento Semanal</p>
+                  <div className="flex justify-between gap-1">
+                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          const next = habitDays.includes(i) ? habitDays.filter(d => d !== i) : [...habitDays, i];
+                          if (next.length > 0) setHabitDays(next);
+                        }}
+                        className={`flex-1 py-3 rounded-xl text-[10px] font-black transition-all border ${
+                          habitDays.includes(i)
+                            ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-md scale-110 z-10'
+                            : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-400 border-zinc-100 dark:border-zinc-800'
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-5 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800">
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Já possuo uma sequência de</p>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="number"
+                      value={initialStreak}
+                      onChange={(e) => setInitialStreak(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-20 px-4 py-2 bg-zinc-50 dark:bg-zinc-800 rounded-xl border border-zinc-100 dark:border-zinc-700 text-center font-black"
+                    />
+                    <span className="text-zinc-500 font-bold text-xs">dias fazendo este hábito</span>
+                  </div>
+                </div>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              <p className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 ml-2">Hábitos Ativos ({habits.length})</p>
+              {habits.map((habit) => (
+                <div key={habit.id} className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                  <div>
+                    <p className="font-bold text-zinc-800 dark:text-zinc-100 text-sm">{habit.title}</p>
+                    <div className="flex gap-1 mt-1">
+                      {[0,1,2,3,4,5,6].map(d => (
+                        <div key={d} className={`w-1.5 h-1.5 rounded-full ${habit.days?.includes(d) ? 'bg-zinc-900 dark:bg-zinc-100' : 'bg-zinc-200 dark:bg-zinc-800'}`} />
+                      ))}
+                    </div>
+                  </div>
                   <button 
                     onClick={() => deleteHabit(habit.id)}
-                    className="opacity-20 hover:opacity-100 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-400 transition-all ml-1"
-                    title="Excluir hábito"
+                    className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </button>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-orange-500 text-sm">🔥</span>
-                    <span className="text-zinc-500 text-sm font-medium">{getEffectiveStreak(habit)} dias</span>
-                  </div>
-                  {habit.bestStreak > 0 && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-zinc-300 text-sm">🏆</span>
-                      <span className="text-zinc-400 text-[10px] font-bold uppercase tracking-tight">Recorde: {habit.bestStreak}</span>
-                    </div>
-                  )}
-                  {habit.type === 'bad' && (
-                    <span className="bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md tracking-wider">Mau Hábito</span>
-                  )}
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleToggleDraft(habit.id)}
-                className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all border-2 
-                  ${isHabitCompleted(habit)
-                    ? habit.type === 'bad'
-                      ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/50 text-rose-600 dark:text-rose-400'
-                      : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
-                  } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-zinc-500/20' : ''}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </button>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
 
-        {pendingToggles.size > 0 && (
+        {activeTab === 'stats' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-8 text-center">
+              <p className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Relatório de Desempenho</p>
+              <h2 className="text-2xl font-black text-zinc-900 dark:text-white">Estatísticas</h2>
+            </div>
+            {renderStats()}
+            {renderHeatmap()}
+            
+            <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50 dark:border-zinc-800">
+              <p className="text-zinc-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-[0.2em]">Configurações & Backup</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={exportData}
+                  className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 transition-all shadow-sm"
+                >
+                  Exportar JSON
+                </button>
+                <label className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 cursor-pointer transition-all shadow-sm">
+                  Importar
+                  <input type="file" className="hidden" accept=".json" onChange={importData} />
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingToggles.size > 0 && activeTab === 'checklist' && (
           <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-50 animate-bounce-subtle">
             <button 
               onClick={saveChanges}
@@ -562,33 +720,40 @@ export default function App() {
         )}
       </main>
 
-      <footer className="max-w-md mx-auto mb-20 px-2">
-        {renderStats()}
-        {renderHeatmap()}
-        
-        <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50 dark:border-zinc-800">
-          <p className="text-zinc-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-[0.2em]">Configurações & Backup</p>
-          <div className="flex gap-4">
-            <button 
-              onClick={exportData}
-              className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 transition-all shadow-sm"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Exportar JSON
-            </button>
-            <label className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 cursor-pointer transition-all shadow-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              Importar
-              <input type="file" className="hidden" accept=".json" onChange={importData} />
-            </label>
-          </div>
-          <p className="text-zinc-300 dark:text-zinc-600 text-[9px] text-center max-w-[200px]">Os dados são salvos apenas no seu navegador. Exporte regularmente para não perder nada.</p>
+      <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
+        <div className="flex gap-2 p-1.5 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-zinc-200/50 dark:border-zinc-800/50 rounded-full shadow-2xl shadow-zinc-900/10">
+          <button
+            onClick={() => setActiveTab('checklist')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${
+              activeTab === 'checklist'
+                ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-lg scale-105'
+                : 'text-zinc-400 hover:text-zinc-600'
+            }`}
+          >
+            Checklist
+          </button>
+          <button
+            onClick={() => setActiveTab('manage')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${
+              activeTab === 'manage'
+                ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-lg scale-105'
+                : 'text-zinc-400 hover:text-zinc-600'
+            }`}
+          >
+            Gerenciar
+          </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${
+              activeTab === 'stats'
+                ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-lg scale-105'
+                : 'text-zinc-400 hover:text-zinc-600'
+            }`}
+          >
+            Estatísticas
+          </button>
         </div>
-      </footer>
+      </nav>
     </div>
   );
 }
