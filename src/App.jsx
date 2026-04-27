@@ -58,7 +58,11 @@ export default function App() {
       await db.habits.put(updatedHabit);
       
       // Add to history
-      await db.history.add({ habitId: id, date: today });
+      await db.history.add({ 
+        habitId: id, 
+        date: today, 
+        timestamp: new Date().getTime() 
+      });
     }
   };
 
@@ -179,6 +183,60 @@ export default function App() {
     );
   };
 
+  const renderStats = () => {
+    const stats = (() => {
+      if (!history || history.length === 0) return null;
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const sevenDaysAgo = today - 7 * 86400000;
+      const fourteenDaysAgo = today - 14 * 86400000;
+
+      const thisWeek = history.filter(h => h.date >= sevenDaysAgo).length;
+      const lastWeek = history.filter(h => h.date >= fourteenDaysAgo && h.date < sevenDaysAgo).length;
+      
+      const diff = thisWeek - lastWeek;
+      const trend = diff >= 0 ? 'melhor' : 'menor';
+
+      const hours = new Array(24).fill(0);
+      history.forEach(h => {
+        if (h.timestamp) {
+          const hour = new Date(h.timestamp).getHours();
+          hours[hour]++;
+        }
+      });
+      const peakHour = hours.indexOf(Math.max(...hours));
+      
+      return { thisWeek, lastWeek, diff, trend, peakHour };
+    })();
+
+    if (!stats) return null;
+
+    return (
+      <div className="grid grid-cols-2 gap-4 mt-8">
+        <div className="bg-white p-5 rounded-3xl border border-zinc-100 shadow-sm">
+          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Horário de Pico</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-2xl font-black text-zinc-900">{stats.peakHour}:00</span>
+            <span className="text-zinc-400 text-xs font-medium">h</span>
+          </div>
+          <p className="text-zinc-400 text-[9px] mt-1 leading-tight">Quando você é mais constante</p>
+        </div>
+        <div className="bg-white p-5 rounded-3xl border border-zinc-100 shadow-sm">
+          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Relatório Semanal</p>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-black text-zinc-900">{stats.thisWeek}</span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+              {stats.diff >= 0 ? '+' : ''}{stats.diff}
+            </span>
+          </div>
+          <p className="text-zinc-400 text-[9px] mt-1 leading-tight">
+            {stats.diff >= 0 ? 'Desempenho superior' : 'Abaixo'} da semana passada
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 p-6 text-zinc-900 selection:bg-zinc-200">
       <header className="mb-12 max-w-md mx-auto pt-8 text-center">
@@ -272,6 +330,7 @@ export default function App() {
       </main>
 
       <footer className="max-w-md mx-auto mb-20 px-2">
+        {renderStats()}
         {renderHeatmap()}
         
         <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50">
