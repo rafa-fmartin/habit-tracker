@@ -5,8 +5,18 @@ import { db } from './db';
 
 export default function App() {
   const [newHabit, setNewHabit] = useState('');
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const habits = useLiveQuery(() => db.habits.toArray());
   const history = useLiveQuery(() => db.history.toArray());
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', darkMode);
+  }, [darkMode]);
 
   const addHabit = async (e) => {
     e.preventDefault();
@@ -145,8 +155,8 @@ export default function App() {
     }
 
     return (
-      <div className="mt-12 bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
-        <h3 className="text-zinc-900 font-bold mb-4 text-sm uppercase tracking-wider flex items-center gap-2">
+      <div className="mt-12 bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+        <h3 className="text-zinc-900 dark:text-zinc-100 font-bold mb-4 text-sm uppercase tracking-wider flex items-center gap-2">
           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
           Consistência Global
         </h3>
@@ -159,10 +169,10 @@ export default function App() {
               <div 
                 key={day}
                 className={`w-3 h-3 rounded-[3px] transition-all duration-500 ${
-                  intensity === 0 ? 'bg-zinc-100' :
-                  intensity <= 0.3 ? 'bg-emerald-200' :
-                  intensity <= 0.7 ? 'bg-emerald-400' :
-                  'bg-emerald-600'
+                  intensity === 0 ? 'bg-zinc-100 dark:bg-zinc-800' :
+                  intensity <= 0.3 ? 'bg-emerald-200 dark:bg-emerald-900' :
+                  intensity <= 0.7 ? 'bg-emerald-400 dark:bg-emerald-700' :
+                  'bg-emerald-600 dark:bg-emerald-500'
                 }`}
                 title={`${new Date(day).toLocaleDateString()}: ${count} hábitos`}
               />
@@ -172,10 +182,10 @@ export default function App() {
         <div className="mt-4 flex justify-between items-center text-[10px] text-zinc-400 font-bold uppercase">
           <span>Menos</span>
           <div className="flex gap-1">
-            <div className="w-2 h-2 bg-zinc-100 rounded-[2px]" />
-            <div className="w-2 h-2 bg-emerald-200 rounded-[2px]" />
-            <div className="w-2 h-2 bg-emerald-400 rounded-[2px]" />
-            <div className="w-2 h-2 bg-emerald-600 rounded-[2px]" />
+            <div className="w-2 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-200 dark:bg-emerald-900 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-400 dark:bg-emerald-700 rounded-[2px]" />
+            <div className="w-2 h-2 bg-emerald-600 dark:bg-emerald-500 rounded-[2px]" />
           </div>
           <span>Mais</span>
         </div>
@@ -213,19 +223,19 @@ export default function App() {
 
     return (
       <div className="grid grid-cols-2 gap-4 mt-8">
-        <div className="bg-white p-5 rounded-3xl border border-zinc-100 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
           <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Horário de Pico</p>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-zinc-900">{stats.peakHour}:00</span>
+            <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.peakHour}:00</span>
             <span className="text-zinc-400 text-xs font-medium">h</span>
           </div>
           <p className="text-zinc-400 text-[9px] mt-1 leading-tight">Quando você é mais constante</p>
         </div>
-        <div className="bg-white p-5 rounded-3xl border border-zinc-100 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 p-5 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
           <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-wider mb-1">Relatório Semanal</p>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-zinc-900">{stats.thisWeek}</span>
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+            <span className="text-2xl font-black text-zinc-900 dark:text-white">{stats.thisWeek}</span>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${stats.diff >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-orange-50 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400'}`}>
               {stats.diff >= 0 ? '+' : ''}{stats.diff}
             </span>
           </div>
@@ -238,13 +248,28 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6 text-zinc-900 selection:bg-zinc-200">
-      <header className="mb-12 max-w-md mx-auto pt-8 text-center">
-        <h1 className="text-4xl font-black tracking-tight text-zinc-900">Hábitos</h1>
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 p-6 text-zinc-900 dark:text-zinc-100 selection:bg-zinc-200 transition-colors duration-500">
+      <header className="mb-12 max-w-md mx-auto pt-8 text-center relative">
+        <button 
+          onClick={() => setDarkMode(!darkMode)}
+          className="absolute right-0 top-8 p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all active:scale-95"
+        >
+          {darkMode ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 9h-1m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          )}
+        </button>
+
+        <h1 className="text-4xl font-black tracking-tight text-zinc-900 dark:text-white">Hábitos</h1>
         <div className="mt-2 flex justify-center items-center gap-2">
-          <span className="h-px w-8 bg-zinc-300"></span>
-          <p className="text-zinc-500 text-xs font-medium uppercase tracking-widest">Vamos ver até onde vai</p>
-          <span className="h-px w-8 bg-zinc-300"></span>
+          <span className="h-px w-8 bg-zinc-300 dark:bg-zinc-800"></span>
+          <p className="text-zinc-500 dark:text-zinc-400 text-xs font-medium uppercase tracking-widest">Vamos ver até onde vai</p>
+          <span className="h-px w-8 bg-zinc-300 dark:bg-zinc-800"></span>
         </div>
 
         {totalHabits > 0 && (
@@ -253,9 +278,9 @@ export default function App() {
               <span className="text-zinc-400 text-xs font-bold uppercase">Progresso de Hoje</span>
               <span className="text-zinc-900 font-black text-lg">{progressPercentage}%</span>
             </div>
-            <div className="h-2 w-full bg-zinc-200 rounded-full overflow-hidden shadow-inner">
+            <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden shadow-inner">
               <div 
-                className="h-full bg-zinc-900 transition-all duration-700 ease-out shadow-[0_0_10px_rgba(0,0,0,0.1)]"
+                className="h-full bg-zinc-900 dark:bg-emerald-500 transition-all duration-700 ease-out shadow-[0_0_10px_rgba(0,0,0,0.1)]"
                 style={{ width: `${progressPercentage}%` }}
               />
             </div>
@@ -265,15 +290,15 @@ export default function App() {
 
       <main className="max-w-md mx-auto">
         <form onSubmit={addHabit} className="mb-8 group">
-          <div className="flex gap-2 p-1.5 bg-white rounded-2xl shadow-sm border border-zinc-200 focus-within:border-zinc-400 focus-within:ring-4 focus-within:ring-zinc-900/5 transition-all">
+          <div className="flex gap-2 p-1.5 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 focus-within:ring-4 focus-within:ring-zinc-900/5 transition-all">
             <input
               type="text"
               value={newHabit}
               onChange={(e) => setNewHabit(e.target.value)}
               placeholder="Qual o hábito de hoje?"
-              className="flex-1 px-4 py-3 bg-transparent outline-none text-zinc-800 placeholder:text-zinc-400"
+              className="flex-1 px-4 py-3 bg-transparent outline-none text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
             />
-            <button className="bg-zinc-900 text-white px-5 py-3 rounded-xl font-bold hover:bg-zinc-800 active:scale-95 transition-all shadow-lg shadow-zinc-200">
+            <button className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-5 py-3 rounded-xl font-bold hover:bg-zinc-800 dark:hover:bg-white active:scale-95 transition-all shadow-lg shadow-zinc-200 dark:shadow-none">
               Adicionar
             </button>
           </div>
@@ -283,11 +308,11 @@ export default function App() {
           {habits?.map((habit) => (
             <div
               key={habit.id}
-              className="group flex items-center justify-between p-5 bg-white rounded-2xl border border-zinc-100 shadow-sm hover:border-zinc-200 transition-all hover:shadow-md"
+              className="group flex items-center justify-between p-5 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm hover:border-zinc-200 dark:hover:border-zinc-700 transition-all hover:shadow-md"
             >
               <div className="flex flex-col flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-zinc-800 text-lg leading-tight">{habit.title}</span>
+                  <span className="font-bold text-zinc-800 dark:text-zinc-100 text-lg leading-tight">{habit.title}</span>
                   <button 
                     onClick={() => deleteHabit(habit.id)}
                     className="opacity-20 hover:opacity-100 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-400 transition-all ml-1"
@@ -316,8 +341,8 @@ export default function App() {
                 onClick={() => toggleHabit(habit.id, habit.streak)}
                 className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all border-2 
                   ${habit.lastCompleted === todayTimestamp
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                    : 'bg-zinc-50 border-zinc-200 text-transparent hover:border-zinc-400'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
                   }`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -333,19 +358,19 @@ export default function App() {
         {renderStats()}
         {renderHeatmap()}
         
-        <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50">
-          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.2em]">Configurações & Backup</p>
+        <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50 dark:border-zinc-800">
+          <p className="text-zinc-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-[0.2em]">Configurações & Backup</p>
           <div className="flex gap-4">
             <button 
               onClick={exportData}
-              className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-zinc-200 text-zinc-600 text-xs font-bold hover:border-zinc-400 transition-all shadow-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 transition-all shadow-sm"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Exportar JSON
             </button>
-            <label className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-zinc-200 text-zinc-600 text-xs font-bold hover:border-zinc-400 cursor-pointer transition-all shadow-sm">
+            <label className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-bold hover:border-zinc-400 dark:hover:border-zinc-600 cursor-pointer transition-all shadow-sm">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
@@ -353,7 +378,7 @@ export default function App() {
               <input type="file" className="hidden" accept=".json" onChange={importData} />
             </label>
           </div>
-          <p className="text-zinc-300 text-[9px] text-center max-w-[200px]">Os dados são salvos apenas no seu navegador. Exporte regularmente para não perder nada.</p>
+          <p className="text-zinc-300 dark:text-zinc-600 text-[9px] text-center max-w-[200px]">Os dados são salvos apenas no seu navegador. Exporte regularmente para não perder nada.</p>
         </div>
       </footer>
     </div>
