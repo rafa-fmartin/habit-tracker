@@ -31,11 +31,14 @@ export default function App() {
 
     if (lastDate === today) {
       // Undo: Go back to previous streak
-      await db.habits.update(id, {
+      const updatedHabit = {
+        ...habit,
         lastCompleted: habit.previousLastCompleted || null,
         streak: Math.max(0, currentStreak - 1),
         bestStreak: habit.previousBestStreak || habit.bestStreak
-      });
+      };
+      await db.habits.put(updatedHabit);
+      
       // Remove from history
       await db.history.where({ habitId: id, date: today }).delete();
     } else {
@@ -44,13 +47,16 @@ export default function App() {
       const newStreak = isContinuation ? currentStreak + 1 : 1;
       const newBestStreak = Math.max(habit.bestStreak || 0, newStreak);
 
-      await db.habits.update(id, {
+      const updatedHabit = {
+        ...habit,
         previousBestStreak: habit.bestStreak,
         previousLastCompleted: habit.lastCompleted,
         lastCompleted: today,
         streak: newStreak,
         bestStreak: newBestStreak
-      });
+      };
+      await db.habits.put(updatedHabit);
+      
       // Add to history
       await db.history.add({ habitId: id, date: today });
     }
@@ -191,7 +197,7 @@ export default function App() {
                   <span className="font-bold text-zinc-800 text-lg leading-tight">{habit.title}</span>
                   <button 
                     onClick={() => deleteHabit(habit.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-zinc-300 hover:text-red-400 transition-all"
+                    className="opacity-20 hover:opacity-100 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-400 transition-all ml-1"
                     title="Excluir hábito"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
