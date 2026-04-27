@@ -171,6 +171,14 @@ export default function App() {
   };
 
   const handleToggleDraft = (id) => {
+    const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+    const habit = habits.find(h => h.id === id);
+    
+    // Prevent changing the status if it has already been saved as completed today
+    if (habit && habit.lastCompleted === today) {
+      return;
+    }
+
     const next = new Set(pendingToggles);
     if (next.has(id)) {
       next.delete(id);
@@ -540,13 +548,14 @@ export default function App() {
 
                       <button
                         onClick={() => handleToggleDraft(habit.id)}
+                        disabled={habit.lastCompleted === todayTimestamp}
                         className={`h-14 w-14 rounded-2xl flex items-center justify-center transition-all border-2 
                           ${isHabitCompleted(habit)
                             ? habit.type === 'bad'
                               ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/50 text-rose-600 dark:text-rose-400'
                               : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
                             : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
-                          } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-zinc-500/20 shadow-xl' : ''}`}
+                          } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-zinc-500/20 shadow-xl' : ''} ${habit.lastCompleted === todayTimestamp ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
