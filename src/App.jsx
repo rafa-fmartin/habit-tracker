@@ -6,6 +6,7 @@ import { db } from './db';
 export default function App() {
   const [newHabit, setNewHabit] = useState('');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
+  const [pendingToggles, setPendingToggles] = useState(new Set());
   const habits = useLiveQuery(() => db.habits.toArray());
   const history = useLiveQuery(() => db.history.toArray());
 
@@ -43,9 +44,9 @@ export default function App() {
       // Undo: Go back to previous streak
       const updatedHabit = {
         ...habit,
-        lastCompleted: habit.previousLastCompleted || null,
+        lastCompleted: habit.previousLastCompleted ?? null,
         streak: Math.max(0, currentStreak - 1),
-        bestStreak: habit.previousBestStreak || habit.bestStreak
+        bestStreak: habit.previousBestStreak ?? habit.bestStreak
       };
       await db.habits.put(updatedHabit);
       
@@ -74,6 +75,26 @@ export default function App() {
         timestamp: new Date().getTime() 
       });
     }
+  };
+
+  const saveChanges = async () => {
+    for (const id of pendingToggles) {
+      const habit = habits.find(h => h.id === id);
+      if (habit) {
+        await toggleHabit(id, habit.streak);
+      }
+    }
+    setPendingToggles(new Set());
+  };
+
+  const handleToggleDraft = (id) => {
+    const next = new Set(pendingToggles);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setPendingToggles(next);
   };
 
   const deleteHabit = async (id) => {
@@ -118,7 +139,14 @@ export default function App() {
   };
 
   const todayTimestamp = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
-  const completedToday = habits?.filter(h => h.lastCompleted === todayTimestamp).length || 0;
+  
+  const isHabitCompleted = (habit) => {
+    const dbCompleted = habit.lastCompleted === todayTimestamp;
+    const isPending = pendingToggles.has(habit.id);
+    return isPending ? !dbCompleted : dbCompleted;
+  };
+
+  const completedToday = habits?.filter(h => isHabitCompleted(h)).length || 0;
   const totalHabits = habits?.length || 0;
   const progressPercentage = totalHabits > 0 ? Math.round((completedToday / totalHabits) * 100) : 0;
 
@@ -338,12 +366,12 @@ export default function App() {
               </div>
 
               <button
-                onClick={() => toggleHabit(habit.id, habit.streak)}
+                onClick={() => handleToggleDraft(habit.id)}
                 className={`h-12 w-12 rounded-2xl flex items-center justify-center transition-all border-2 
-                  ${habit.lastCompleted === todayTimestamp
+                  ${isHabitCompleted(habit)
                     ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
                     : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-transparent hover:border-zinc-400 dark:hover:border-zinc-500'
-                  }`}
+                  } ${pendingToggles.has(habit.id) ? 'opacity-60 ring-2 ring-emerald-500/20' : ''}`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -352,6 +380,20 @@ export default function App() {
             </div>
           ))}
         </div>
+
+        {pendingToggles.size > 0 && (
+          <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-50 animate-bounce-subtle">
+            <button 
+              onClick={saveChanges}
+              className="bg-emerald-500 text-white px-8 py-4 rounded-2xl font-black shadow-2xl shadow-emerald-500/40 hover:bg-emerald-600 active:scale-95 transition-all flex items-center gap-3 border-2 border-white/20"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+              Salvar Alterações
+            </button>
+          </div>
+        )}
       </main>
 
       <footer className="max-w-md mx-auto mb-20 px-2">
