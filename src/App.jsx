@@ -52,7 +52,8 @@ export default function App() {
       frequency: habitDays.length === 7 ? 'daily' : 'flexible',
       streak: parseInt(initialStreak) || 0,
       bestStreak: parseInt(initialStreak) || 0,
-      lastCompleted: initialStreak > 0 ? getPreviousScheduledDay(habitDays) : null
+      lastCompleted: initialStreak > 0 ? getPreviousScheduledDay(habitDays) : null,
+      createdAt: new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime()
     });
     setNewHabit('');
     setHabitType('good');
@@ -74,7 +75,7 @@ export default function App() {
       const updatedHabit = {
         ...habit,
         lastCompleted: habit.previousLastCompleted ?? null,
-        streak: Math.max(0, currentStreak - 1),
+        streak: habit.type === 'bad' ? (habit.previousStreak ?? habit.streak) : Math.max(0, currentStreak - 1),
         bestStreak: habit.previousBestStreak ?? habit.bestStreak
       };
       await db.habits.put(updatedHabit);
@@ -85,13 +86,14 @@ export default function App() {
       // Complete: Check if it's a continuation or a reset
       const lastScheduled = getPreviousScheduledDay(habit.days || [0,1,2,3,4,5,6]);
       const isContinuation = lastDate === lastScheduled;
-      const newStreak = isContinuation ? currentStreak + 1 : 1;
+      const newStreak = habit.type === 'bad' ? 0 : (isContinuation ? currentStreak + 1 : 1);
       const newBestStreak = Math.max(habit.bestStreak || 0, newStreak);
 
       const updatedHabit = {
         ...habit,
         previousBestStreak: habit.bestStreak,
         previousLastCompleted: habit.lastCompleted,
+        previousStreak: habit.streak,
         lastCompleted: today,
         streak: newStreak,
         bestStreak: newBestStreak
@@ -239,20 +241,53 @@ export default function App() {
     return null;
   };
 
-  const getEffectiveStreak = (habit) => {
-    if (!habit.lastCompleted) return 0;
+  const getScheduledDaysBetween = (startTimestamp, endTimestamp, scheduledDays) => {
+    if (!startTimestamp || !endTimestamp || startTimestamp >= endTimestamp) return 0;
     
-    const now = new Date();
+    let count = 0;
+    let current = new Date(startTimestamp);
+    current.setDate(current.getDate() + 1); // Start day after
+    current.setHours(0,0,0,0);
     
-    // If it's a scheduled day today and it's not completed yet, check if it broke on the previous scheduled day
-    const isScheduledToday = habit.days?.includes(now.getDay());
-    const lastScheduled = getPreviousScheduledDay(habit.days || [0,1,2,3,4,5,6]);
-    
-    if (habit.lastCompleted < lastScheduled && (isScheduledToday || lastScheduled > habit.lastCompleted)) {
-      return 0;
+    const end = new Date(endTimestamp);
+    end.setHours(0,0,0,0);
+
+    while (current <= end) {
+      if (scheduledDays.includes(current.getDay())) {
+        count++;
+      }
+      current.setDate(current.getDate() + 1);
     }
+    return count;
+  };
+
+  const getEffectiveStreak = (habit) => {
+    const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
     
-    return habit.streak;
+    if (habit.type === 'bad') {
+      const isFailedTodayInDb = habit.lastCompleted === today;
+      const isPending = pendingToggles.has(habit.id);
+      const isFailedToday = isPending ? !isFailedTodayInDb : isFailedTodayInDb;
+      
+      if (isFailedToday) return 0;
+
+      const lastRecorded = habit.lastCompleted || habit.createdAt || today;
+      const daysSince = getScheduledDaysBetween(lastRecorded, today, habit.days || [0,1,2,3,4,5,6]);
+      
+      return (habit.streak || 0) + daysSince;
+    } else {
+      if (!habit.lastCompleted) return 0;
+      
+      const now = new Date();
+      const isScheduledToday = habit.days?.includes(now.getDay());
+      const lastScheduled = getPreviousScheduledDay(habit.days || [0,1,2,3,4,5,6]);
+      
+      if (habit.lastCompleted < lastScheduled && (isScheduledToday || lastScheduled > habit.lastCompleted)) {
+        return 0;
+      }
+      
+      return habit.streak;
+    }
   };
 
   const todayTimestamp = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
