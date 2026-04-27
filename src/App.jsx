@@ -65,7 +65,42 @@ export default function App() {
   const deleteHabit = async (id) => {
     if (confirm('Tem certeza que deseja excluir este hábito?')) {
       await db.habits.delete(id);
+      await db.history.where({ habitId: id }).delete();
     }
+  };
+
+  const exportData = async () => {
+    const habitsList = await db.habits.toArray();
+    const historyList = await db.history.toArray();
+    const data = JSON.stringify({ habits: habitsList, history: historyList, date: new Date().toISOString() });
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `habitos-backup-${new Date().toLocaleDateString()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (confirm('Isso irá substituir todos os seus hábitos atuais. Tem certeza?')) {
+          await db.habits.clear();
+          await db.history.clear();
+          await db.habits.bulkAdd(data.habits);
+          await db.history.bulkAdd(data.history);
+          window.location.reload();
+        }
+      } catch (err) {
+        alert('Arquivo inválido ou corrompido.');
+      }
+    };
+    reader.readAsText(file);
   };
 
   const todayTimestamp = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
@@ -238,6 +273,29 @@ export default function App() {
 
       <footer className="max-w-md mx-auto mb-20 px-2">
         {renderHeatmap()}
+        
+        <div className="mt-12 mb-8 flex flex-col items-center gap-4 py-8 border-t border-zinc-200/50">
+          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.2em]">Configurações & Backup</p>
+          <div className="flex gap-4">
+            <button 
+              onClick={exportData}
+              className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-zinc-200 text-zinc-600 text-xs font-bold hover:border-zinc-400 transition-all shadow-sm"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Exportar JSON
+            </button>
+            <label className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-zinc-200 text-zinc-600 text-xs font-bold hover:border-zinc-400 cursor-pointer transition-all shadow-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Importar
+              <input type="file" className="hidden" accept=".json" onChange={importData} />
+            </label>
+          </div>
+          <p className="text-zinc-300 text-[9px] text-center max-w-[200px]">Os dados são salvos apenas no seu navegador. Exporte regularmente para não perder nada.</p>
+        </div>
       </footer>
     </div>
   );
